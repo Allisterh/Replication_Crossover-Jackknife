@@ -23,6 +23,8 @@ library(xtable)
 library(plm)
 library(gmm)
 library(boot)
+filepath <- "/Users/shuowenchen/desktop/Research/Panel-Cross-over-jackknife/Crossover-Jackknife/Simulation Code"
+setwd(filepath)
 
 data2 <- read.dta("democracy-balanced-l4.dta")
 data2 <- pdata.frame(data2, index = c("id", "year"))
@@ -32,7 +34,7 @@ T <- length(unique(data2$year))
 ## Calibration by Fixed Effects
 ################################
 # Regression Specification
-form <- lgdp ~ dem + l1lgdp + l2lgdp + l3lgdp + l4lgdp + factor(year) + factor(id)
+form <- lgdp ~ dem + l1lgdp + l2lgdp + l3lgdp + l4lgdp + factor(year) + factor(id) 
 # Create lagged dependent variable
 data2$l1lgdp <- lag(data2$lgdp, 1)
 data2$l2lgdp <- lag(data2$lgdp, 2) 
@@ -40,7 +42,7 @@ data2$l3lgdp <- lag(data2$lgdp, 3)
 data2$l4lgdp <- lag(data2$lgdp, 4) 
 
 ##### 1. FE using data at hand ####
-fit <- lm(form, data2) 
+fit <- lm(form, data2)
 coefs <- coef(fit)[2:6]
 sigma <- summary(fit)$sigma
 # Long run effects of treatment
@@ -60,14 +62,13 @@ rm(sdata)
 
 ## Auxiliary Functions 
 # (a) Generate data sets
-data.rg <- function(data, coef = coefs, sig = sigma, index = index0, mle) {
+data_rg <- function(data, coef = coefs, sig = sigma, index = index0, mle) {
   N <- length(unique(data$id))
   T <- length(unique(data$year))
-  coef <- coef[-1]
   slgdp <- matrix(data$lgdp, nrow = T, ncol = N)
   # Generate simulated dependent variable from t=5 
-  for (t in 5) {
-    slgdp[t, ] <- index[t - 4, ] + coefs[1]*slgdp[t - 1, ] + coefs[2]*slgdp[t - 2, ] + coefs[3]*slgdp[t - 3, ] + coefs[4]*slgdp[t - 4, ] + sig*rnorm(N)
+  for (t in 5:T) {
+    slgdp[t, ] <- index[t - 4, ] + coef[2]*slgdp[t - 1, ] + coef[3]*slgdp[t - 2, ] + coef[4]*slgdp[t - 3, ] + coef[5]*slgdp[t - 4, ] + sig*rnorm(N)
   }
   data_b <- data
   # Replace with simulated dependent variable
@@ -77,30 +78,7 @@ data.rg <- function(data, coef = coefs, sig = sigma, index = index0, mle) {
   return(data_b)
 }
 
-data_rg <- function(data, fit_original = fit, index0 = index0, mle) {
-  N <- length(unique(data$id))
-  T <- length(unique(data$year))
-  coefs <- coef(fit_original)[3:6] # coefs on lagged dependent variable
-  sigma <- summary(fit_original)$sigma 
-  slgdp <- matrix(data$lgdp, nrow = T, ncol = N)
-  index0 <- matrix(index0, nrow = T - 4, ncol = N)
-  # Generate simulated dependent variable from t=5 
-  for (t in 5:T) {
-    slgdp[t, ] <- index0[t - 4, ] + coefs[1]*slgdp[t - 1, ] + 
-      coefs[2]*slgdp[t - 2, ] + coefs[3]*slgdp[t - 3, ] + 
-      coefs[4]*slgdp[t - 4, ] + sigma*rnorm(N)
-  }
-  data_b <- data
-  # Replace with simulated dependent variable
-  data_b$lgdp <- matrix(slgdp, ncol = 1)
-  data_b <- data.frame(data_b)
-  data_b <- pdata.frame(data_b, index = c("id", "year"))    
-  return(data_b)
-}
 
-check <- function(data, form_fe, form_abc) {
-  return(names(data))
-}
 # (b) Analytical Bias correction
 abc <- function(data, form, lags, N) {
   data$l1lgdp <- lag(data$lgdp, 1)
@@ -164,13 +142,13 @@ cbc <- function(data, form) {
   return(coef_cbc)
 }
 #### 3. Simulation ####
-R <- 500
 
 ## statistics to be computed in each bootstrap draw ##
 boot_fe <- function(data, form_fe, form_abc) {
   # Fixed Effects
-  fe_fit <- plm(form_fe, data, model = "within", effect = "twoways", index = c("id", "year"))
-  coefs_fe <- coef(fe_fit)
+  fit <- lm(form_fe, data) # essentially the same as plm, but using richer summary output
+  #fe_fit <- plm(form_fe, data, model = "within", effect = "twoways", index = c("id", "year"))
+  coefs_fe <- coef(fit)[1:5]
   # abc
   bias_l4 <- abc(data, form = form_abc, lags = 4, N = length(levels(data$id)))
   coefs_abc4 <- coefs_fe - bias_l4 
@@ -178,17 +156,84 @@ boot_fe <- function(data, form_fe, form_abc) {
   coefs_sbc <- sbc(data, form = form_fe)
   # cbc
   coefs_cbc <- cbc(data, form = form_fe)
+  # standard errors
+  se_fe <- coef(summary(fit))[2:6, 2]
   # Return outputs
-  return(c(coefs_fe, coefs_abc4, coefs_sbc, coefs_cbc))
+  return(c(coefs_fe, coefs_abc4, coefs_sbc, coefs_cbc, se_fe))
 }
 
-set.seed(888)
-form_fe <- lgdp ~ dem + l1lgdp + l2lgdp + l3lgdp + l4lgdp + factor(year) + factor(id) - 1
-form_abc <- lgdp ~ dem + l1lgdp + l2lgdp + l3lgdp + l4lgdp + factor(year) + factor(id)
+set.seed(88)
+R <- 500
+coefs_fe_b <- matrix(0, nrow = R, ncol = 5)
+coefs_abc4 <- matrix(0, nrow = R, ncol = 5)
+coefs_sbc <- matrix(0, nrow = R, ncol = 5)
+coefs_cbc <- matrix(0, nrow = R, ncol = 5)
+se_fe <- matrix(0, nrow = R, ncol = 5)
+for (i in 1:R) {
+  slgdp <- matrix(data$lgdp, nrow = T, ncol = N)
+  # Generate simulated dependent variable from t=5 
+  for (t in 5:T) {
+    slgdp[t, ] <- index[t - 4, ] + coefs[2]*slgdp[t - 1, ] + coefs[3]*slgdp[t - 2, ] + coefs[4]*slgdp[t - 3, ] + coefs[5]*slgdp[t - 4, ] + sigma*rnorm(N)
+  }
+  data_b <- data
+  # Replace with simulated dependent variable
+  data_b$lgdp <- matrix(slgdp, ncol = 1)
+  data_b <- data.frame(data_b)
+  data_b <- pdata.frame(data_b, index = c("id", "year"))
+  # Fixed Effects
+  fit_b <- lm(form, data_b) # essentially the same as plm, but using richer summary output
+  #fe_fit <- plm(form_fe, data, model = "within", effect = "twoways", index = c("id", "year"))
+  coefs_fe_b[i, ] <- coef(fit_b)[2:6]
+  # abc
+  bias_l4 <- abc(data_b, form, lags = 4, N = length(levels(data$id)))
+  coefs_abc4[i, ] <- coefs_fe_b[i, ] - bias_l4 
+  # sbc
+  coefs_sbc[i, ] <- sbc(data_b, form)
+  # cbc
+  coefs_cbc[i, ] <- cbc(data_b, form)
+  # standard errors
+  se_fe[i, ] <- coef(summary(fit))[2:6, 2]
+}
 
-sim_fe <- boot(data = data2, statistic = boot_fe, sim = "parametric", ran.gen = data.rg, 
-               mle = 0, form_fe = form_fe, form_abc = form_abc,  parallel = "multicore", 
-               ncpus = 1, R = 5)
+
+#form_fe <- lgdp ~ dem + l1lgdp + l2lgdp + l3lgdp + l4lgdp + factor(year) + factor(id)
+#form_abc <- lgdp ~ dem + l1lgdp + l2lgdp + l3lgdp + l4lgdp + factor(year) + factor(id)
+#sim_fe <- boot(data = data2, statistic = boot_fe, sim = "parametric", ran.gen = data_rg, 
+#               mle = 0, form_fe = form_fe, form_abc = form_abc,  parallel = "multicore", 
+#               ncpus = 1, R = 5)
+
+# Post Simulation Summary
+
+#sim_nobc <- sim_fe$t[, 1:5]
+#sim_abc4 <- sim_fe$t[, 6:10]
+#sim_sbc <- sim_fe$t[, 11:15]
+#sim_cbc <- sim_fe$t[, 16:20]
+#sim_se <- sim_fe$t[, 21:25]
+
+sumstatslinear <- function(sim, real, se_sim) {
+  output <- matrix(0, nrow = dim(sim)[2], ncol = 5)
+  colnames(output) <- c("bias", "std", "RMSE", "SE/SD", "p95")
+  rownames(output) <- names(real)
+  for (i in 1:dim(sim)[2]) {
+    # bias
+    output[i, 1] <- 100*(mean(sim[, i], na.rm = TRUE)/real[i] - 1)
+    # standard deviation
+    output[i, 2] <- 100*sd(sim[, i]/real[i], na.rm = TRUE)
+    # rmse
+    output[i, 3] <- 100*sqrt(mean((sim[, i]/real[i] - 1)^2, na.rm = TRUE))
+    # se_sd
+    output[i, 4] <- (mean((se_sim[, i]/sd(sim[, i], na.rm = TRUE)), na.rm = TRUE))
+    # pvalue
+    output[i, 5] <- (mean((sim[, i] + qnorm(.05/2) * se_sim[, i] <= real[i]) &
+                            (sim[, i] + qnorm(1 - .05/2) * se_sim[, i] >= real[i]), na.rm = TRUE))
+  }
+  return(output)
+}
+
+sum_nobc <- sumstatslinear(coefs_fe_b, coefs, se_fe)
+sum_abc4 <- sumstatslinear(coefs_abc4, coefs, se_fe)
+sum_sbc <- sumstatslinear(coefs_sbc, coefs, se_fe)
+sum_cbc <- sumstatslinear(coefs_cbc, coefs, se_fe)
 
 # robust estimator of std deviation based on IQR
 rsd <- function(x) {

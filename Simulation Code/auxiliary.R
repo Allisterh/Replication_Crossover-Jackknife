@@ -176,3 +176,39 @@ boot_stat <- function(data, spec_fe_s) {
 set.seed(88)
 sim_fe <- boot(data = data, statistic = boot_stat, sim = "parametric", ran.gen = data_gen, mle = 0, 
                spec_fe_s = spec_fe_s, parallel = "multicore", ncpus = 1, R = B)
+
+# Post Simulation Summary
+sim_tot <- matrix(as.numeric(sim_fe$t), nrow = B, ncol = 35)
+sim_nobc <- sim_tot[, 1:7]
+sim_abc <- sim_tot[, 8:14]
+sim_sbc <- sim_tot[, 15:21]
+sim_cbc <- sim_tot[, 22:28]
+sim_se <- sim_tot[, 29:35]
+
+sumstats <- function(sim, real, se_sim, conv) {
+  output <- matrix(0, nrow = dim(sim)[2], ncol = 5)
+  colnames(output) <- c("bias", "std", "RMSE", "SE/SD", "p95")
+  rownames(output) <- names(real)
+  for (i in 1:dim(sim)[2]) {
+    # bias
+    output[i, 1] <- 100*(mean(sim[conv, i], na.rm = TRUE)/real[i] - 1)
+    # standard deviation
+    output[i, 2] <- 100*sd(sim[conv, i]/real[i], na.rm = TRUE)
+    # rmse
+    output[i, 3] <- 100*sqrt(mean((sim[conv, i]/real[i] - 1)^2, na.rm = TRUE))
+    # se_sd
+    output[i, 4] <- (mean((se_sim[conv, i]/sd(sim[conv, i], na.rm = TRUE)), na.rm = TRUE))
+    # pvalue
+    output[i, 5] <- (mean((sim[conv, i] + qnorm(.05/2) * se_sim[conv, i] <= real[i]) &
+                      (sim[conv, i] + qnorm(1 - .05/2) * se_sim[conv, i] >= real[i]), na.rm = TRUE))
+  }
+  return(output)
+}
+
+# covergence 
+convergence <- abs(sim_sbc[, 1]) < 100 & abs(sim_sbc[, 2]) < 100 & abs(sim_cbc[, 1]) < 100 & abs(sim_cbc[, 2]) < 100
+
+sum_nobc <- sumstats(sim_nobc, beta0, sim_se, convergence)
+sum_abc <- sumstats(sim_abc, beta0, sim_se, convergence)
+sum_sbc <- sumstats(sim_sbc, beta0, sim_se, convergence)
+sum_cbc <- sumstats(sim_cbc, beta0, sim_se, convergence)
