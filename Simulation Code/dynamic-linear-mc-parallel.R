@@ -6,10 +6,9 @@ library(boot)
 filepath <- "/Users/shuowenchen/desktop/Research/Panel-Cross-over-jackknife/Crossover-Jackknife/Simulation Code"
 setwd(filepath)
 ###  read-in Democracy data
-
 democracydata <- read.dta("democracy-balanced-l4.dta")
-democracydata <- pdata.frame(democracydata, index = c("id","year"))
-
+democracydata <- pdata.frame(democracydata, index = c("id", "year"))
+# create lagged terms
 democracydata$l1lgdp <- lag(democracydata$lgdp, 1)
 democracydata$l2lgdp <- lag(democracydata$lgdp, 2) 
 democracydata$l3lgdp <- lag(democracydata$lgdp, 3) 
@@ -17,20 +16,39 @@ democracydata$l4lgdp <- lag(democracydata$lgdp, 4)
 
 # Bias correction functions
 # 1. Analytical Bias correction
-abc <- function(data, formula, lags, N) {
+abc <- function(data, form, lags, N) {
   fit <- lm(form, data, x = TRUE, na.action = na.omit)
   res <- fit$residuals
-  jac <- solve(t(fit$x) %*% fit$x / length(res))
+  jac <- solve(t(fit$x) %*% fit$x / length(res))[2:6, 2:6]
   indexes <- c(1:length(res))
-  bscore <- rep(0, length(coef(fit)))
+  bscore <- rep(0, 5)
   T <- length(res)/N
   for (i in 1:lags) {
     indexes <- indexes[-c(1 + c(0:(N - 1))*T)]
     lindexes <- indexes - i
-    bscore  <- bscore + t(fit$x[indexes, ]) %*% res[lindexes] / length(res)
+    bscore <- bscore + t(fit$x[indexes, 2:6]) %*% res[lindexes] / length(indexes)
   }
-  bias <- -jac %*% bscore
-  return(bias[2:6]/T)
+  bias <- -jac %*% bscore;
+  return(as.vector(bias/T))
+}
+
+# a function that randomly splits s times along the cross-section
+# and pool to get mega half panels for crossover jackknife bc
+mega_data <- function(s, n, unit, time, dat, uc, fm) {
+  mega1 <- list()
+  mega2 <- list()
+  for (i in 1:s) {
+    index <- sample(n, ceiling(n/2), replace = FALSE)
+    sub1 <- (unit %in% index & time <= median(time)) |
+      (!(unit %in% index) & time >= median(time))
+    sub2 <- (unit %in% index & time >= median(time)) | 
+      (!(unit %in% index) & time <= median(time))
+    mega1[[i]] <- dat[sub1, ]
+    mega2[[i]] <- dat[sub2, ]
+  }
+  mega1 <- do.call(rbind, mega1)
+  mega2 <- do.call(rbind, mega2)
+  return(list(mega1, mega2))
 }
 
 # 2. Split Sample Jackknife (F-V and Weidner, 2016)
@@ -146,9 +164,9 @@ boot_fe <- function(data, fm) {
   fit_b <- lm(fm, data) 
   coefs_fe_b <- coef(fit_b)[2:6]
   # abc
-  bias4 <- abc(data, formula = fm, lags = 4, N = length(unique(data$id)))
-  bias8 <- abc(data, formula = fm, lags = 8, N = length(unique(data$id)))
-  bias12 <- abc(data, formula = fm, lags = 12, N = length(unique(data$id)))
+  bias4 <- abc(data, form = fm, lags = 4, N = length(unique(data$id)))
+  bias8 <- abc(data, form = fm, lags = 8, N = length(unique(data$id)))
+  bias12 <- abc(data, form = fm, lags = 12, N = length(unique(data$id)))
   coefs_abc4_b <- coefs_fe_b - bias4
   coefs_abc8_b <- coefs_fe_b - bias8
   coefs_abc12_b <- coefs_fe_b - bias12

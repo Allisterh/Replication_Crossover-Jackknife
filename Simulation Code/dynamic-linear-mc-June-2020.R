@@ -77,21 +77,6 @@ abc <- function(data, formu, lags, N) {
   return(as.vector(bias/T))
 }
 
-abc2 <- function(data, formu, lags, N) {
-  fit <- lm(formu, data, x = TRUE, na.action = na.omit)
-  res <- fit$residuals
-  jac <- solve(t(fit$x) %*% fit$x / length(res))
-  indexes <- c(1:length(res))
-  bscore <- rep(0, 5)
-  T <- length(res)/N
-  for (i in 1:lags) {
-    indexes   <- indexes[-c(1 + c(0:(N - 1))*T)]
-    lindexes  <- indexes - i
-    bscore  <- bscore + t(fit$x[indexes, ]) %*% res[lindexes] / length(res)
-  }
-  bias <- -jac %*% bscore
-  return(bias[2:6]/T)
-}
 
 # Split Sample Jackknife (F-V and Weidner, 2016)
 sbc <- function(data, formu) {
@@ -179,16 +164,6 @@ for (i in 1:R) {
   data_b <- data.frame(id = kronecker(c(1:N), rep(1, T2)), year = kronecker(rep(1, N), c(1:T2)), 
                        lgdp = ys, l1lgdp = l1ys, l2lgdp = l2ys, l3lgdp = l3ys, l4lgdp = l4ys, 
                        dem = fit$x[, "dem"])
-  #slgdp <- matrix(data2$lgdp, nrow = T, ncol = N)
-  # Generate simulated dependent variable from t=5 
-  #for (t in 5:T) {
-  #  slgdp[t, ] <- index0[t - 4, ] + coefs[2]*slgdp[t - 1, ] + coefs[3]*slgdp[t - 2, ] + coefs[4]*slgdp[t - 3, ] + coefs[5]*slgdp[t - 4, ] + sigma*rnorm(N)
-  #}
-  #data_b <- data2
-  # Replace with simulated dependent variable
-  #data_b$lgdp <- matrix(slgdp, ncol = 1)
-  #data_b <- data.frame(data_b)
-  #data_b <- pdata.frame(data_b, index = c("id", "year"))
   
   # Fixed Effects
   fit_b <- lm(form, data_b)
