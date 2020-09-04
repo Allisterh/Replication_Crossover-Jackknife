@@ -192,60 +192,6 @@ estimators <- function(data, form) {
            se_betahatfete))
 }
 
-###################################################################
-###################################################################
-### TESTING PURPOSES
-justsbc10 <- function(data, form) {
-  # Fixed Effects
-  deltahatfete <- feglm(form, data, 
-                        family = binomial(link = "probit"))
-  betahatfete <- coef(deltahatfete)
-  # Various Bias Correction Methods
-  time <- as.double(data$year)
-  unit <- as.double(data$id)
-  # 2. Split-sample with Multiple Splitting bias correction
-  #betahatsbc10 <- tryCatch(sbc_multiple(s = 1, n = length(levels(data$id)), 
-  #                             unit, time, form, data, betahatfete),
-  #                         error = function(x) rep(NA, 7)
-  betahatsbc10 <- try(sbc_multiple(s = 1, n = length(levels(data$id)), 
-                                        unit, time, form, data, betahatfete)
-  )
-  return(c(betahatsbc10))
-}
-
-bb <- function(data, form.fe, ncores, btimes, bseed) {
-  # store seeds set in the global environment
-  old <- .Random.seed
-  # upon exiting the function environment, 
-  # restore to the original seed
-  on.exit({.Random.seed <<- old})
-  # within this function environment, set
-  # the new seed for bootstrap standard errors
-  set.seed(bseed, kind = "L'Ecuyer-CMRG")
-  result <- boot(data = data, statistic = justsbc10, sim = "parametric", 
-                 ran.gen = data.rg, mle = 0, form = form.fe,
-                 parallel = "multicore", ncpus = ncores, R = btimes)
-  result <- structure(vapply(result$t, as.double, numeric(1)), 
-                      dim = dim(result$t))
-  se <- apply(result, 2, function(x) {
-    return((quantile(x, .75, na.rm = TRUE) - 
-              quantile(x, .25, na.rm = TRUE))/(qnorm(.75) - qnorm(.25)))
-  })
-  return(se)
-}
-
-bstat <- function(data, form.fe, ncores, btimes, bseed){
-  bestimate <- justsbc10(data, form.fe)
-  se <- bb(data, form.fe, ncores, btimes, bseed)
-  return(c(bestimate, se))
-}
-
-tryhard <- boot(data = lfpdata, statistic = justsbc10, sim = "parametric", 
-                ran.gen = data.rg, mle = 0, form = spec_fe,
-                parallel = "multicore", ncpus = 1, R = 30)
-###################################################################
-###################################################################
-
 # Function to generate bootstrap data sets
 # We use nonparametric panel bootstrap
 data.rg <- function(data, mle) {
@@ -285,15 +231,8 @@ bse <- function(data, form.fe, ncores, btimes, bseed) {
 bootstat <- function(data, form.fe, ncores, btimes, bseed){
   bestimate <- estimators(data, form.fe)
   se <- bse(data, form.fe, ncores, btimes, bseed)
- # se <- tryCatch(bse(data, form.fe, ncores, btimes, bseed),
-#                 error = function(c) "err")
-  
-  return(bestimate)
-  #return(c(bestimate, se))
+  return(c(bestimate, se))
 }
-
-
-
 
 ################# Start of Calibration Exercise
 lfpdata <- read.dta("LFPmovers.dta")
@@ -393,20 +332,20 @@ data_calireshuffle <- function(data, mle) {
   return(data_s)
 }
 
+# For actual simulation set R and btimes to 500 and 200
 core <- 1
 seed_bse <- 13 # seed for bootstrap standard error estimation
 set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
 parallel::mc.reset.stream()
-#bda <- boot(data = lfpdata, statistic = bootstat, sim = "parametric", 
-#            mle = 0, form.fe = spec_fe, ncores = core, bseed = seed_bse,
-#            ran.gen = data_calibration, btimes = 10, R = 10, ncpus = core)
-bda2 <- boot(data = lfpdata, statistic = bstat, sim = "parametric", 
+bda <- boot(data = lfpdata, statistic = bootstat, sim = "parametric", 
             mle = 0, form.fe = spec_fe, ncores = core, bseed = seed_bse,
-            ran.gen = data_calibration, btimes = 200, R = 3, ncpus = core)
+            ran.gen = data_calibration, btimes = 10, R = 10, ncpus = core)
 
-performancetable <- function(est, bse, ase, est0) {
-  tab <- matrix(0, ncol = 9, nrow = 7, 
-                dimnames = list(c('FE', 'SBC', 'ABC', 'CBC', 'CBC-1/3', 'MBC', 'Syn'),
+# a function that produces the diagnostic statistics
+table_lfp <- function(est, bse, ase, est0) {
+  tab <- matrix(0, nrow = 9, ncol = 9, 
+                dimnames = list(c('FE', 'SBC', 'ABC', 'CBC', 'CBC-1/3', 'MBC', 'Syn',
+                                  'CBC5', 'CBC5-1/3'),
                                 c('Bias', 'Std Dev', 'RMSE', 'BSE/SD', 'ASE/SD', 
                                   'p.95 (BSE)', 'p.95 (ASE)', 'Length (BSE)', 
                                   'Length (ASE)')))
@@ -422,28 +361,28 @@ performancetable <- function(est, bse, ase, est0) {
   return(tab)
 }
 
-est_laglfp <- bda$t[, c(1, 8, 15, 22, 29, 36, 43)]
-est_kids02 <- bda$t[, 1 + c(1, 8, 15, 22, 29, 36, 43)]
-est_kids35 <- bda$t[, 2 + c(1, 8, 15, 22, 29, 36, 43)]
-est_kids617 <- bda$t[, 3 + c(1, 8, 15, 22, 29, 36, 43)]
-est_lhi <- bda$t[, 4 + c(1, 8, 15, 22, 29, 36, 43)]
-est_age <- bda$t[, 5 + c(1, 8, 15, 22, 29, 36, 43)]
-est_age2 <- bda$t[, 6 + c(1, 8, 15, 22, 29, 36, 43)]
-est_ase <- bda$t[, c(50:56)]
+est_laglfp <- bda$t[, c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_kids02 <- bda$t[, 1 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_kids35 <- bda$t[, 2 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_kids617 <- bda$t[, 3 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_lhi <- bda$t[, 4 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_age <- bda$t[, 5 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_age2 <- bda$t[, 6 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_ase <- bda$t[, c(64:70)]
 
-bse_laglfp <- bda$t[, 56 + c(1, 8, 15, 22, 29, 36, 43)]
-bse_kids02 <- bda$t[, 56 + 1 + c(1, 8, 15, 22, 29, 36, 43)]
-bse_kids35 <- bda$t[, 56 + 2 + c(1, 8, 15, 22, 29, 36, 43)]
-bse_kids617 <- bda$t[, 56 + 3 + c(1, 8, 15, 22, 29, 36, 43)]
-bse_lhi <- bda$t[, 56 + 4 + c(1, 8, 15, 22, 29, 36, 43)]
-bse_age <- bda$t[, 56 + 5 + c(1, 8, 15, 22, 29, 36, 43)]
-bse_age2 <- bda$t[, 56 + 6 + c(1, 8, 15, 22, 29, 36, 43)]
+bse_laglfp <- bda$t[, 70 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+bse_kids02 <- bda$t[, 70 + 1 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+bse_kids35 <- bda$t[, 70 + 2 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+bse_kids617 <- bda$t[, 70 + 3 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+bse_lhi <- bda$t[, 70 + 4 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+bse_age <- bda$t[, 70 + 5 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+bse_age2 <- bda$t[, 70 + 6 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
 
-laglfp_co <- performancetable(est_laglfp, bse_laglfp, est_ase[, 1], betahatfete[1])
-kids02_co <- performancetable(est_kids02, bse_kids02, est_ase[, 2], betahatfete[2])
-kids35_co <- performancetable(est_kids35, bse_kids35, est_ase[, 3], betahatfete[3])
-kids617_co <- performancetable(est_kids617, bse_kids617, est_ase[, 4], betahatfete[4])
-lhi_co <- performancetable(est_lhi, bse_lhi, est_ase[, 5], betahatfete[5])
-age_co <- performancetable(est_age, bse_age, est_ase[, 6], betahatfete[6])
-age2_co <- performancetable(est_age2, bse_age2, est_ase[, 7], betahatfete[7])
+laglfp_co <- table_lfp(est_laglfp, bse_laglfp, est_ase[, 1], betahatfete[1])
+kids02_co <- table_lfp(est_kids02, bse_kids02, est_ase[, 2], betahatfete[2])
+kids35_co <- table_lfp(est_kids35, bse_kids35, est_ase[, 3], betahatfete[3])
+kids617_co <- table_lfp(est_kids617, bse_kids617, est_ase[, 4], betahatfete[4])
+lhi_co <- table_lfp(est_lhi, bse_lhi, est_ase[, 5], betahatfete[5])
+age_co <- table_lfp(est_age, bse_age, est_ase[, 6], betahatfete[6])
+age2_co <- table_lfp(est_age2, bse_age2, est_ase[, 7], betahatfete[7])
 

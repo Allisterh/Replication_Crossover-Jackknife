@@ -304,6 +304,7 @@ data_calireshuffle <- function(data, mle) {
   return(data_b)
 }
 
+##########
 time_cal <- 5 # number of simulations
 core <- 1
 seed_bse <- 13 # seed for bootstrap standard error estimation
@@ -351,4 +352,4 @@ lr_co <- performancetable(est_lr, bse_lr, lr0)
 
 ######## Save the workspace
 #save.image(file = "democracymbc20.RData")
-# Estimators to be computed in each calibration and bootstrap estimation
+
