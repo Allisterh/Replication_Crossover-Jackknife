@@ -43,7 +43,7 @@ N0 <- length(unique(data$id))
 T0 <- length(unique(data$year))
 P0 <- 7 # number of nonfe regressors in the specification
 P <- 7
-B <- 2 # number of bootstrap
+B <- 5 # number of bootstrap
 N <- N0 # number of individuals
 T <- T0 # number of time periods
 

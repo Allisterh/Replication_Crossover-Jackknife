@@ -21,7 +21,7 @@
 library(foreign)
 library(xtable)
 library(plm)
-library(gmm)
+#library(gmm)
 library(boot)
 filepath <- "/Users/shuowenchen/desktop/Research/Panel-Cross-over-jackknife/Crossover-Jackknife/Simulation Code"
 setwd(filepath)
