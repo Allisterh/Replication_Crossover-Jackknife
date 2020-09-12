@@ -166,9 +166,9 @@ estimators <- function(data, form) {
   # 5. Crossover with 1/3 overlapping;
   betahatjbc <- crossover(unit, time, data, betahatfete, form, q = 2/3)
   # 6. Crossover with multiple sample splitting
-  betahatcbc5 <- hybrid_mbcovp(s = 5, n = length(levels(data$id)), unit,
+  betahatcbc5 <- hybrid_mbcovp(s = 50, n = length(levels(data$id)), unit,
                                time, data, betahatfete, form)
-  betahatjbc5 <- hybrid_mbcovp(s = 5, n = length(levels(data$id)), unit,
+  betahatjbc5 <- hybrid_mbcovp(s = 50, n = length(levels(data$id)), unit,
                                time, data, betahatfete, form, q = 2/3)
   # 7. Mega sample split cross over
   mega <- mega_data(s = 2, dat = data)
@@ -333,35 +333,44 @@ data_calireshuffle <- function(data, mle) {
 }
 
 # For actual simulation set R and btimes to 500 and 200
-core <- 1
+core <- 28
 seed_bse <- 13 # seed for bootstrap standard error estimation
 set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
 parallel::mc.reset.stream()
 bda <- boot(data = lfpdata, statistic = bootstat, sim = "parametric", 
             mle = 0, form.fe = spec_fe, ncores = core, bseed = seed_bse,
-            ran.gen = data_calibration, btimes = 10, R = 10, ncpus = core)
+            ran.gen = data_calibration, btimes = 200, R = 500, ncpus = core)
 
 # a function that produces the diagnostic statistics
-table_lfp <- function(est, bse, ase, est0) {
-  tab <- matrix(0, nrow = 9, ncol = 9, 
-                dimnames = list(c('FE', 'SBC', 'ABC', 'CBC', 'CBC-1/3', 'MBC', 'Syn',
-                                  'CBC5', 'CBC5-1/3'),
-                                c('Bias', 'Std Dev', 'RMSE', 'BSE/SD', 'ASE/SD', 
-                                  'p.95 (BSE)', 'p.95 (ASE)', 'Length (BSE)', 
-                                  'Length (ASE)')))
+table_simulation <- function(est, bse, ase, est0, 
+                             app = c("dem", "lfp")) {
+  app <- match.arg(app)
+  tab <- matrix(0, nrow = 9, ncol = 9)
+  colnames(tab) <- c('Bias', 'Std Dev', 'RMSE', 'BSE/SD', 
+                     'ASE/SD', 'p.95 (BSE)', 'p.95 (ASE)', 
+                     'Length (BSE)', 'Length (ASE)')
+  if (app == "dem") {
+    rownames(tab) <- c('FE', 'SBC', 'ABC', 'CBC', 'CBC-5/19', 
+                       'MBC', 'Syn', 'CBC50', 'CBC50-5/19')
+  } else {
+    rownames(tab) <- c('FE', 'SBC', 'ABC', 'CBC', 'CBC-1/3', 
+                       'MBC', 'Syn', 'CBC50', 'CBC50-1/3')
+  }
   tab[, 1] <- 100*(apply(est, 2, mean)/est0 - 1)
   tab[, 2] <- 100*(apply(est/est0, 2, sd))
   tab[, 3] <- 100*sqrt((apply((est/est0 - 1)^2, 2, mean)))
   tab[, 4] <- apply((bse/apply(est, 2, sd)), 2, mean)
   tab[, 5] <- mean(ase)/apply(est, 2, sd)
-  tab[, 6] <- apply((est + qnorm(.05/2)*bse <= est0) & (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)
-  tab[, 7] <- apply((est + qnorm(.05/2)*ase <= est0) & (est + qnorm(1 - .05/2)*ase >= est0), 2, mean)
+  tab[, 6] <- apply((est + qnorm(.05/2)*bse <= est0) & 
+                      (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)
+  tab[, 7] <- apply((est + qnorm(.05/2)*ase <= est0) & 
+                      (est + qnorm(1 - .05/2)*ase >= est0), 2, mean)
   tab[, 8] <- 2*qnorm(1 - .05/2)*apply(bse, 2, mean)/abs(est0)
   tab[, 9] <- 2*qnorm(1 - .05/2)*mean(ase)/abs(est0)
   return(tab)
 }
 
-est_laglfp <- bda$t[, c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
+est_laglfp <- bda$t[, c(1, 8, 15, 22, 29, 36, 43, 50, 57)] 
 est_kids02 <- bda$t[, 1 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
 est_kids35 <- bda$t[, 2 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
 est_kids617 <- bda$t[, 3 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
@@ -378,11 +387,18 @@ bse_lhi <- bda$t[, 70 + 4 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
 bse_age <- bda$t[, 70 + 5 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
 bse_age2 <- bda$t[, 70 + 6 + c(1, 8, 15, 22, 29, 36, 43, 50, 57)]
 
-laglfp_co <- table_lfp(est_laglfp, bse_laglfp, est_ase[, 1], betahatfete[1])
-kids02_co <- table_lfp(est_kids02, bse_kids02, est_ase[, 2], betahatfete[2])
-kids35_co <- table_lfp(est_kids35, bse_kids35, est_ase[, 3], betahatfete[3])
-kids617_co <- table_lfp(est_kids617, bse_kids617, est_ase[, 4], betahatfete[4])
-lhi_co <- table_lfp(est_lhi, bse_lhi, est_ase[, 5], betahatfete[5])
-age_co <- table_lfp(est_age, bse_age, est_ase[, 6], betahatfete[6])
-age2_co <- table_lfp(est_age2, bse_age2, est_ase[, 7], betahatfete[7])
+laglfp_co <- table_simulation(est_laglfp, bse_laglfp, 
+                              est_ase[, 1], betahatfete[1], app = "lfp")
+kids02_co <- table_simulation(est_kids02, bse_kids02, 
+                              est_ase[, 2], betahatfete[2], app = "lfp")
+kids35_co <- table_simulation(est_kids35, bse_kids35, 
+                              est_ase[, 3], betahatfete[3], app = "lfp")
+kids617_co <- table_simulation(est_kids617, bse_kids617,
+                               est_ase[, 4], betahatfete[4], app = "lfp")
+lhi_co <- table_simulation(est_lhi, bse_lhi, est_ase[, 5], 
+                           betahatfete[5], app = "lfp")
+age_co <- table_simulation(est_age, bse_age, est_ase[, 6], 
+                           betahatfete[6], app = "lfp")
+age2_co <- table_simulation(est_age2, bse_age2, est_ase[, 7], 
+                            betahatfete[7], app = "lfp")
 

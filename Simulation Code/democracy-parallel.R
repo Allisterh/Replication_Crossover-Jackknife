@@ -177,19 +177,28 @@ estimator2 <- function(data, form) {
   lr_synbc <- 2*lr_fe - syn[1]/(1 - sum(syn[2:5]))
   
   # multiple sample splitting to crossover jackknife
-  cbc5 <- multiplecrossover(s = 5, n = length(levels(data$id)), id, year,
+  cbc5 <- multiplecrossover(s = 50, n = length(levels(data$id)), id, year,
                             data, coefs_fe, lr_fe, form, q = 10/19)
   coefs_cbc5 <- cbc5[[1]]
   lr_cbc5 <- cbc5[[2]]
-  jbc5 <- multiplecrossover(s = 5, n = length(levels(data$id)), id, year,
+  jbc5 <- multiplecrossover(s = 50, n = length(levels(data$id)), id, year,
                             data, coefs_fe, lr_fe, form, q = 12/19)
   coefs_jbc5 <- jbc5[[1]]
   lr_jbc5 <- jbc5[[2]]
   
+  # compute analytical clustered standard errors
+  fit <- plm(lgdp ~ dem + lag(lgdp, 1:4) - 1, data, model = "within", 
+             effect = "twoways", index = c("id","year"))
+  HCV_coefs <- vcovHC(fit, cluster = 'group')
+  cse <- sqrt(diag(HCV_coefs)) 
+  jac_lr <- c(1, rep(lr_fe, 4))/(1 - sum(coefs_fe[2:5]))
+  cse_lr <- sqrt(t(jac_lr) %*% HCV_coefs %*% jac_lr)
+  
   return(c(coefs_fe, coefs_sbc, coefs_abc, coefs_cbc, 
            coefs_jbc, coefs_mbc, syn_bc, coefs_cbc5,
            coefs_jbc5, lr_fe, lr_sbc, lr_abc, lr_cbc, 
-           lr_jbc, lr_mbc, lr_synbc, lr_cbc5, lr_jbc5))
+           lr_jbc, lr_mbc, lr_synbc, lr_cbc5, lr_jbc5,
+           cse, cse_lr))
 }
 
 # A function that calls computes bootstrap standard errors within in simulation
@@ -305,50 +314,66 @@ data_calireshuffle <- function(data, mle) {
 }
 
 ##########
-time_cal <- 5 # number of simulations
-core <- 1
+time_cal <- 500 # number of simulations
+core <- 28
 seed_bse <- 13 # seed for bootstrap standard error estimation
 set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
 parallel::mc.reset.stream()
-bda <- boot(data = data, statistic = bootstat, sim = "parametric", mle = 0, 
-            formula = form, ncores = core, btimes = 10, bseed = seed_bse,
+bd <- boot(data = data, statistic = bootstat, sim = "parametric", mle = 0, 
+            formula = form, ncores = core, btimes = 200, bseed = seed_bse,
             ran.gen = data_calireshuffle, R = time_cal, ncpus = core)
 
 ########## Printing results
-est_dem <- bda$t[, c(1, 6, 11, 16, 21, 26, 31, 36, 41)]
-est_l1 <- bda$t[, (1 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-est_l2 <- bda$t[, (2 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-est_l3 <- bda$t[, (3 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-est_l4 <- bda$t[, (4 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-est_lr <- bda$t[, c(46:54)]
-bse_dem <- bda$t[, (54 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-bse_l1 <- bda$t[, (54 + 1 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-bse_l2 <- bda$t[, (54 + 2 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-bse_l3 <- bda$t[, (54 + 3 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-bse_l4 <- bda$t[, (54 + 4 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
-bse_lr <- bda$t[, (54 + c(46:54))]
+est_dem <- bd$t[, c(1, 6, 11, 16, 21, 26, 31, 36, 41)]
+est_l1 <- bd$t[, (1 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+est_l2 <- bd$t[, (2 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+est_l3 <- bd$t[, (3 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+est_l4 <- bd$t[, (4 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+est_lr <- bd$t[, c(46:54)]
+est_cse_coef <- bd$t[, c(55:59)]
+ese_cse_lr <- bd$t[, 60]
+bse_dem <- bd$t[, (60 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+bse_l1 <- bd$t[, (60 + 1 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+bse_l2 <- bd$t[, (60 + 2 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+bse_l3 <- bd$t[, (60 + 3 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+bse_l4 <- bd$t[, (60 + 4 + c(1, 6, 11, 16, 21, 26, 31, 36, 41))]
+bse_lr <- bd$t[, (60 + c(46:54))]
 # We are interested in the properties of the following
 # estimators: democracy, 4 lags of output, long run effect
-performancetable <- function(est, bse, est0) {
-  tab <- matrix(0, ncol = 6, nrow = 9, 
-                dimnames = list(c('FE', 'SBC', 'ABC', 'CBC', 'CBC-5/19', 'MBC', 'Syn',
-                                  'CBCm5', 'CBCovpm5'),
-                                c('Bias', 'Std Dev', 'RMSE', 'SE/SD', 'p.95', 'Length')))
+table_simulation <- function(est, bse, ase, est0, 
+                             app = c("dem", "lfp")) {
+  app <- match.arg(app)
+  tab <- matrix(0, nrow = 9, ncol = 9)
+  colnames(tab) <- c('Bias', 'Std Dev', 'RMSE', 'BSE/SD', 
+                     'ASE/SD', 'p.95 (BSE)', 'p.95 (ASE)', 
+                     'Length (BSE)', 'Length (ASE)')
+  if (app == "dem") {
+    rownames(tab) <- c('FE', 'SBC', 'ABC', 'CBC', 'CBC-5/19', 
+                       'MBC', 'Syn', 'CBC50', 'CBC50-5/19')
+  } else {
+    rownames(tab) <- c('FE', 'SBC', 'ABC', 'CBC', 'CBC-1/3', 
+                       'MBC', 'Syn', 'CBC50', 'CBC50-1/3')
+  }
   tab[, 1] <- 100*(apply(est, 2, mean)/est0 - 1)
   tab[, 2] <- 100*(apply(est/est0, 2, sd))
   tab[, 3] <- 100*sqrt((apply((est/est0 - 1)^2, 2, mean)))
   tab[, 4] <- apply((bse/apply(est, 2, sd)), 2, mean)
-  tab[, 5] <- apply((est + qnorm(.05/2)*bse <= est0) & (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)
-  tab[, 6] <- 2*qnorm(1 - .05/2)*apply(bse, 2, mean)/abs(est0)
+  tab[, 5] <- mean(ase)/apply(est, 2, sd)
+  tab[, 6] <- apply((est + qnorm(.05/2)*bse <= est0) & 
+                      (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)
+  tab[, 7] <- apply((est + qnorm(.05/2)*ase <= est0) & 
+                      (est + qnorm(1 - .05/2)*ase >= est0), 2, mean)
+  tab[, 8] <- 2*qnorm(1 - .05/2)*apply(bse, 2, mean)/abs(est0)
+  tab[, 9] <- 2*qnorm(1 - .05/2)*mean(ase)/abs(est0)
   return(tab)
 }
 
-dem_co <- performancetable(est_dem, bse_dem, coefs0[2])
-l1lgdp_co <- performancetable(est_l1, bse_l1, coefs0[3])
-l2lgdp_co <- performancetable(est_l2, bse_l2, coefs0[4])
-l3lgdp_co <- performancetable(est_l3, bse_l3, coefs0[5])
-l4lgdp_co <- performancetable(est_l4, bse_l4, coefs0[6])
-lr_co <- performancetable(est_lr, bse_lr, lr0)
+dem_co <- table_simulation(est_dem, bse_dem, est_cse_coef[, 1], coefs0[2])
+l1lgdp_co <- table_simulation(est_l1, bse_l1, est_cse_coef[, 2], coefs0[3])
+l2lgdp_co <- table_simulation(est_l2, bse_l2, est_cse_coef[, 3], coefs0[4])
+l3lgdp_co <- table_simulation(est_l3, bse_l3, est_cse_coef[, 4], coefs0[5])
+l4lgdp_co <- table_simulation(est_l4, bse_l4, est_cse_coef[, 5], coefs0[6])
+lr_co <- table_simulation(est_lr, bse_lr, ese_cse_lr, lr0)
 
 ######## Save the workspace
 #save.image(file = "democracymbc20.RData")
