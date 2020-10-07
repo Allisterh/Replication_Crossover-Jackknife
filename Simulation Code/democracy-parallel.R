@@ -1,4 +1,4 @@
-# 9/3/2020 Shuowen Chen
+# 9/20/2020 Shuowen Chen
 # This script implements calibrated exercise using democracy data
 library(foreign)
 library(plm)
@@ -177,18 +177,18 @@ estimator2 <- function(data, form) {
   lr_synbc <- 2*lr_fe - syn[1]/(1 - sum(syn[2:5]))
   
   # multiple sample splitting to crossover jackknife
-  cbc5 <- multiplecrossover(s = 50, n = length(levels(data$id)), id, year,
+  cbc5 <- multiplecrossover(s = 2, n = length(levels(data$id)), id, year,
                             data, coefs_fe, lr_fe, form, q = 10/19)
   coefs_cbc5 <- cbc5[[1]]
   lr_cbc5 <- cbc5[[2]]
-  jbc5 <- multiplecrossover(s = 50, n = length(levels(data$id)), id, year,
+  jbc5 <- multiplecrossover(s = 2, n = length(levels(data$id)), id, year,
                             data, coefs_fe, lr_fe, form, q = 12/19)
   coefs_jbc5 <- jbc5[[1]]
   lr_jbc5 <- jbc5[[2]]
   
   # compute analytical clustered standard errors
   fit <- plm(lgdp ~ dem + lag(lgdp, 1:4) - 1, data, model = "within", 
-             effect = "twoways", index = c("id","year"))
+             effect = "twoways", index = c("id", "year"))
   HCV_coefs <- vcovHC(fit, cluster = 'group')
   cse <- sqrt(diag(HCV_coefs)) 
   jac_lr <- c(1, rep(lr_fe, 4))/(1 - sum(coefs_fe[2:5]))
@@ -199,6 +199,7 @@ estimator2 <- function(data, form) {
            coefs_jbc5, lr_fe, lr_sbc, lr_abc, lr_cbc, 
            lr_jbc, lr_mbc, lr_synbc, lr_cbc5, lr_jbc5,
            cse, cse_lr))
+  
 }
 
 # A function that calls computes bootstrap standard errors within in simulation
@@ -211,7 +212,7 @@ bse <- function(data, fm, ncores, btimes, bseed) {
   # within this function environment, set
   # the new seed
   set.seed(bseed, kind = "L'Ecuyer-CMRG")
-  result <- boot(data = data, statistic = estimator2, sim = "parametric", 
+  result <- boot(data = data, statistic = estimator3, sim = "parametric", 
                  ran.gen = data.rg, mle = 0, form = fm, 
                  parallel = "multicore", ncpus = ncores, R = btimes)
   result <- structure(vapply(result$t, as.double, numeric(1)), 
@@ -250,6 +251,8 @@ coefs0 <- fe_fit$coefficients
 lr0 <- coefs0[2]/(1 - sum(coefs0[3:6]))
 T <- length(levels(data$year)) - 4 # takes out 4 lags of obs
 N <- length(levels(data$id))
+
+
 
 # Generate simulated data
 data_calibration <- function(data, mle) {
@@ -314,13 +317,13 @@ data_calireshuffle <- function(data, mle) {
 }
 
 ##########
-time_cal <- 500 # number of simulations
-core <- 28
+time_cal <- 5 # number of simulations
+core <- 1
 seed_bse <- 13 # seed for bootstrap standard error estimation
 set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
 parallel::mc.reset.stream()
 bd <- boot(data = data, statistic = bootstat, sim = "parametric", mle = 0, 
-            formula = form, ncores = core, btimes = 200, bseed = seed_bse,
+            formula = form, ncores = core, btimes = 20, bseed = seed_bse,
             ran.gen = data_calireshuffle, R = time_cal, ncpus = core)
 
 ########## Printing results
@@ -357,7 +360,7 @@ table_simulation <- function(est, bse, ase, est0,
   tab[, 1] <- 100*(apply(est, 2, mean)/est0 - 1)
   tab[, 2] <- 100*(apply(est/est0, 2, sd))
   tab[, 3] <- 100*sqrt((apply((est/est0 - 1)^2, 2, mean)))
-  tab[, 4] <- apply((bse/apply(est, 2, sd)), 2, mean)
+  tab[, 4] <- apply(bse, 2, mean)/apply(est, 2, sd)
   tab[, 5] <- mean(ase)/apply(est, 2, sd)
   tab[, 6] <- apply((est + qnorm(.05/2)*bse <= est0) & 
                       (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)

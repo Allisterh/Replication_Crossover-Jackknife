@@ -264,6 +264,7 @@ draws <- 10
 deltahatfete <- feglm(spec_fe, data = lfpdata, 
                       family = binomial(link = "probit"))
 betahatfete <- deltahatfete$coefficients
+# Compute theta*y_{i,t-1}+beta*X_{i,t}+\alpha_{i}+\gamma_{t}
 index <- predict(deltahatfete)
 index0 <- index - betahatfete[1] * lfpdata$laglfp
 index1 <- index + betahatfete[1] * (1 - lfpdata$laglfp)
@@ -271,7 +272,9 @@ index1 <- index + betahatfete[1] * (1 - lfpdata$laglfp)
 # Estimated coefficients from the data
 beta0 <- betahatfete[c(1:P)]
 
+# Interpretation: beta*X_{i,t}+\alpha_{i}+\gamma_{t}
 true_index0 <- matrix(index0, nrow = T, byrow = FALSE)
+# Interpretation: theta-theta*y_{i,t-1}+beta*X_{i,t}+\alpha_{i}+\gamma_{t}
 true_index1 <- matrix(index1, nrow = T, byrow = FALSE)
 
 rm(deltahatfete, index, index0, index1)
@@ -359,7 +362,7 @@ table_simulation <- function(est, bse, ase, est0,
   tab[, 1] <- 100*(apply(est, 2, mean)/est0 - 1)
   tab[, 2] <- 100*(apply(est/est0, 2, sd))
   tab[, 3] <- 100*sqrt((apply((est/est0 - 1)^2, 2, mean)))
-  tab[, 4] <- apply((bse/apply(est, 2, sd)), 2, mean)
+  tab[, 4] <- apply(bse, 2, mean)/apply(est, 2, sd)
   tab[, 5] <- mean(ase)/apply(est, 2, sd)
   tab[, 6] <- apply((est + qnorm(.05/2)*bse <= est0) & 
                       (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)
