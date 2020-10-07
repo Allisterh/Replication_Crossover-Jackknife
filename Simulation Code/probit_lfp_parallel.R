@@ -1,4 +1,4 @@
-# 9/2/2020 Shuowen Chen
+# 10/7/2020 Shuowen Chen
 # This script implements calibrated exercise on LFP
 
 ### set working directory

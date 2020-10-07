@@ -1,4 +1,4 @@
-# 9/20/2020 Shuowen Chen
+# 10/7/2020 Shuowen Chen
 # This script implements calibrated exercise using democracy data
 library(foreign)
 library(plm)
@@ -177,28 +177,36 @@ estimator2 <- function(data, form) {
   lr_synbc <- 2*lr_fe - syn[1]/(1 - sum(syn[2:5]))
   
   # multiple sample splitting to crossover jackknife
-  cbc5 <- multiplecrossover(s = 2, n = length(levels(data$id)), id, year,
+  cbc5 <- multiplecrossover(s = 50, n = length(levels(data$id)), id, year,
                             data, coefs_fe, lr_fe, form, q = 10/19)
   coefs_cbc5 <- cbc5[[1]]
   lr_cbc5 <- cbc5[[2]]
-  jbc5 <- multiplecrossover(s = 2, n = length(levels(data$id)), id, year,
+  jbc5 <- multiplecrossover(s = 50, n = length(levels(data$id)), id, year,
                             data, coefs_fe, lr_fe, form, q = 12/19)
   coefs_jbc5 <- jbc5[[1]]
   lr_jbc5 <- jbc5[[2]]
   
+  # NOTE: it's a bit strange that clustered se gives different results in
+  # the calibration. Since we specify the DGP clustered and unclustered 
+  # shouldn't matter. The commented code implements clustered.
+  
   # compute analytical clustered standard errors
-  fit <- plm(lgdp ~ dem + lag(lgdp, 1:4) - 1, data, model = "within", 
-             effect = "twoways", index = c("id", "year"))
-  HCV_coefs <- vcovHC(fit, cluster = 'group')
-  cse <- sqrt(diag(HCV_coefs)) 
+  #fit <- plm(lgdp ~ dem + lag(lgdp, 1:4) - 1, data, model = "within", 
+  #           effect = "twoways", index = c("id", "year"))
+  #HCV_coefs <- vcovHC(fit, cluster = 'group')
+  #cse <- sqrt(diag(HCV_coefs)) 
+  #jac_lr <- c(1, rep(lr_fe, 4))/(1 - sum(coefs_fe[2:5]))
+  #cse_lr <- sqrt(t(jac_lr) %*% HCV_coefs %*% jac_lr)
+  
+  se <- coef(summary(fe_fit))[, 2][2:6]
   jac_lr <- c(1, rep(lr_fe, 4))/(1 - sum(coefs_fe[2:5]))
-  cse_lr <- sqrt(t(jac_lr) %*% HCV_coefs %*% jac_lr)
+  se_lr <- sqrt(t(jac_lr) %*% vcov(fe_fit)[2:6, 2:6] %*% jac_lr)
   
   return(c(coefs_fe, coefs_sbc, coefs_abc, coefs_cbc, 
            coefs_jbc, coefs_mbc, syn_bc, coefs_cbc5,
            coefs_jbc5, lr_fe, lr_sbc, lr_abc, lr_cbc, 
            lr_jbc, lr_mbc, lr_synbc, lr_cbc5, lr_jbc5,
-           cse, cse_lr))
+           se, se_lr))
   
 }
 
@@ -317,13 +325,13 @@ data_calireshuffle <- function(data, mle) {
 }
 
 ##########
-time_cal <- 5 # number of simulations
-core <- 1
+time_cal <- 500 # number of simulations
+core <- 28
 seed_bse <- 13 # seed for bootstrap standard error estimation
 set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
 parallel::mc.reset.stream()
 bd <- boot(data = data, statistic = bootstat, sim = "parametric", mle = 0, 
-            formula = form, ncores = core, btimes = 20, bseed = seed_bse,
+            formula = form, ncores = core, btimes = 200, bseed = seed_bse,
             ran.gen = data_calireshuffle, R = time_cal, ncpus = core)
 
 ########## Printing results
