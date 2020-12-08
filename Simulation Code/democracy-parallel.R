@@ -6,8 +6,8 @@ library(sandwich)
 library(boot)
 library(speedglm)
 ###  read-in Democracy data
-#filepath <- "/Users/shuowenchen/desktop/Research/Panel-Cross-over-jackknife/Crossover-Jackknife/Simulation Code"
-#setwd(filepath)
+filepath <- "/Users/shuowenchen/desktop/Research/Panel-Cross-over-jackknife/Crossover-Jackknife/Simulation Code"
+setwd(filepath)
 
 ######### Bootstrap Bias Correction Functions
 # 1. analytical bias correction
@@ -220,7 +220,7 @@ bse <- function(data, fm, ncores, btimes, bseed) {
   # within this function environment, set
   # the new seed
   set.seed(bseed, kind = "L'Ecuyer-CMRG")
-  result <- boot(data = data, statistic = estimator3, sim = "parametric", 
+  result <- boot(data = data, statistic = estimator2, sim = "parametric", 
                  ran.gen = data.rg, mle = 0, form = fm, 
                  parallel = "multicore", ncpus = ncores, R = btimes)
   result <- structure(vapply(result$t, as.double, numeric(1)), 
@@ -261,7 +261,6 @@ T <- length(levels(data$year)) - 4 # takes out 4 lags of obs
 N <- length(levels(data$id))
 
 
-
 # Generate simulated data
 data_calibration <- function(data, mle) {
   y  <- matrix(0, nrow = T, ncol = N)
@@ -269,6 +268,11 @@ data_calibration <- function(data, mle) {
   l2y  <- matrix(0, nrow = T, ncol = N)
   l3y  <- matrix(0, nrow = T, ncol = N)
   l4y  <- matrix(0, nrow = T, ncol = N)
+  # set the initial observations in lags to the observed values in the dataset
+  for (t in 1:4) l4y[t, ] <- data[(t + c(0:(N - 1))*(T + 4)), 6]
+  l3y[1:3, ] <- l4y[2:4, ]
+  l2y[1:2, ] <- l3y[2:3, ]
+  l1y[1, ] <- l2y[2, ]
   y[1, ] <- index[1 + c(0:(N - 1))*T] + coefs0["l1lgdp"]*l1y[1, ] + 
     coefs0["l2lgdp"]*l2y[1, ] + coefs0["l3lgdp"]*l3y[1, ] + 
     coefs0["l4lgdp"]*l4y[1, ] + rnorm(N, mean = 0, sd = sigma)
@@ -299,6 +303,11 @@ data_calireshuffle <- function(data, mle) {
   l2y  <- matrix(0, nrow = T, ncol = N)
   l3y  <- matrix(0, nrow = T, ncol = N)
   l4y  <- matrix(0, nrow = T, ncol = N)
+  # set the initial observations in lags to the observed values in the dataset
+  for (t in 1:4) l4y[t, ] <- data[(t + c(0:(N - 1))*(T + 4)), 6]
+  l3y[1:3, ] <- l4y[2:4, ]
+  l2y[1:2, ] <- l3y[2:3, ]
+  l1y[1, ] <- l2y[2, ]
   y[1, ] <- index[1 + c(0:(N - 1))*T] + coefs0["l1lgdp"]*l1y[1, ] + 
     coefs0["l2lgdp"]*l2y[1, ] + coefs0["l3lgdp"]*l3y[1, ] + 
     coefs0["l4lgdp"]*l4y[1, ] + rnorm(N, mean = 0, sd = sigma)
