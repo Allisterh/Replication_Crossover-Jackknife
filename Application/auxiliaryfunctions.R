@@ -1,24 +1,23 @@
-# 7/29/2020 Shuowen Chen
-# This script stores some auxiliary functions for the crossover 
-# jackknife bias correction project
+# 11/10/2020 Shuowen Chen
+# This script stores some auxiliary functions for the application part 
+# the crossover jackknife bias correction 
 
 ###### Create regression formula 
 # Inputs:
-# yvar: dependent variable for bpiy and piy
+# yvar:  dependent variable for bpiy and piy
 # xvars: regressors. 
-#  (a) For bpiy, regressors are behavior, policy and information
-#  (b) For pib, regressors are policy and information, dependent variable
-#      is 1 of the 4 behavior variables
-#  (c) For piy, regressors are policy and information variables
-# iv: This is to accommodate the syntax of felm. "0" means no iv. 
+#        (a) For bpiy, regressors are behavior, policy and information
+#        (b) For pib, regressors are policy and information while 
+#            dependent variable is 1 of the 4 behavior variables
+#        (c) For piy, regressors are policy and information variables
+# iv:    This is to accommodate the syntax of felm. "0" means no iv. 
 # cluster: cluster at state level (treatment). 
-#
+# fe:    two way fixed effects
+# 
 # Outputs:
 # Regression formula for felm and lm (for analytical bias correction)
-#
-# Note: interacted fixed effect hasn't been tested. 
 createfmla_fe <- function(yvar, xvars, iv = "0", cluster = "state",
-                          fe = c("state + month", "state*month")) {
+                          fe = c("state + month", "state + week")) {
   fe <- match.arg(fe)
   rhs <- paste(xvars, collapse = " + ")
   rhs_felm <- paste(rhs," | ", fe, " | ", iv, " | ", 
@@ -32,13 +31,13 @@ createfmla_fe <- function(yvar, xvars, iv = "0", cluster = "state",
 }
 
 ############# Different Bias Correction Functions
-# Analytical bias correction for dynamic linear panel
+# 1. Analytical bias correction for dynamic linear panel
 # Inputs:
-# fit: output from the lm command
+# fit:  output from the lm command
 # trim: trimming parameter for bias correction
-# N: number of cross section identity
-# rhs: regressors for bias correction
-# unc: uncorrecteed fixed effect estimators
+# N:    number of cross section identity
+# rhs:  regressors for bias correction
+# unc:  uncorrecteed fixed effect estimators
 #
 # Output:
 # corrected: analytically bias corrected estimators
@@ -63,14 +62,14 @@ abc <- function(data, fit, trim, n, rhs, unc) {
 # Inputs:
 # unit: number of cross section units
 # time: number of time series units
-# dat: data
-# uc: uncorrected fixed effects estimators
-# fm: regression formula (felm)
-# q: fraction of time periods used in each subpabel. Default is 0.5, and there
-#    is no overlap. Larger than 0.5 features overlap in the time periods used: 
-#    fraction is 2*q - 1
+# dat:  data
+# uc:   uncorrected fixed effects estimators
+# fm:   regression formula (felm)
+# q:    fraction of time periods used in each subpabel. Default is 0.5, 
+#       and there is no overlap. Larger than 0.5 features overlap in 
+#       the time periods used: fraction is 2*q - 1
 # Outputs:
-# bc: bias corrected estimators
+# bc:   bias corrected estimators
 crossover <- function(unit, time, dat, uc, fm, q = 0.5) {
   t_cutoff <- c(floor(quantile(time, q)), 
                 ceiling(quantile(time, 1 - q)))
@@ -110,7 +109,7 @@ multiple_split <- function(s, n, unit, time, dat, uc, fm) {
   return(acbc)
 }
 
-# A variation that tends to stablize the multiple split
+# 4. A variation that tends to stablize the multiple split
 mega_split <- function(s, n, unit, time, dat, uc, fm) {
   mega1 <- list()
   mega2 <- list()
@@ -136,7 +135,7 @@ mega_split <- function(s, n, unit, time, dat, uc, fm) {
 }
 
 
-# a function that combines mbc and crossover with overlap 
+# 5. a function that combines mbc and crossover with overlap 
 # when q - 0.5, same as multiple_split
 hybrid_mbcovp <- function(s, n, unit, time, dat, uc, fm, q) {
   across <- 0 * uc
@@ -159,7 +158,7 @@ hybrid_mbcovp <- function(s, n, unit, time, dat, uc, fm, q) {
   return(acbc)
 }
 
-# The only difference from hybrid_mbcovp: instead of aggregating
+# 6. The only difference from hybrid_mbcovp: instead of aggregating
 # by average, take the median
 hybrid_median <- function(s, n, unit, time, dat, uc, fm, q) {
   cross_mat <- matrix(0, nrow = length(uc), ncol = s)
@@ -184,7 +183,7 @@ hybrid_median <- function(s, n, unit, time, dat, uc, fm, q) {
   return(acbc)
 }
 
-# syntheticpanel: relabel the id of states in the second 
+# 7. syntheticpanel: relabel the id of states in the second 
 # half of the time periods. This creates a synthetic panel
 # with 2n states, T periods and T/2 observations per state
 syntheticpanelbc <- function(dat, uc, fm) {
@@ -201,6 +200,130 @@ syntheticpanelbc <- function(dat, uc, fm) {
   syn_bc <- 2*uc - coef(fit_syn)
   return(syn_bc)
 }
+
+##### A function that implements fixed effect and debiased fixed effects
+# Inputs:
+#  df:          data
+#  yvar:        dependent variable. For pib, 1 of the 4 behavior variables
+#  pols:        policy variables
+#  x:           infovars + exclusion restriction
+#  iv:          instruments for felm
+#  l:           time lag btw infection and case/death confirmation
+#  frac:        fraction of time periods used in subpanel for crossover
+#  num_split:   number of sample split for multiple splitting
+#  fixedeffect: two way fixed effect specification
+# 
+# Outputs:
+#  FE, Bias corrected, sum of policy and behavioral coefficients
+
+reg_fe <- function(df, yvar, pols, bvars, x, iv, l = 14, frac,
+                   num_split, fixedeffect) {
+  if (l == 0) {
+    # This is for pib
+    p <- pols
+    b <- bvars
+  } else {
+    # This is for pbiy and piy
+    p <- sprintf("lag(%s, %d)", pols, l)
+    b <- sprintf("lag(%s, %d)", bvars, l)
+  }
+  # create regression formula
+  xvars <- c(p, b, x)
+  fmla <- createfmla_fe(yvar, xvars, fe = fixedeffect, iv = iv)
+  
+  # Uncorrected Estimator
+  whole <- felm(fmla[[1]], data = df, weights = df$sweight)  
+  coef_nobc <- coef(whole)
+  
+  # Various Bias Correction Estimators
+  unit <- as.double(df$state)
+  time <- as.double(df$date)
+  # 1. Crossover Jackknife without overlap
+  coef_cbc <- crossover(unit, time, df, coef_nobc, fmla[[1]], q = 0.5)
+  # 2. Multiple split bias correction
+  coef_acbc <- multiple_split(s = num_split, length(levels(df$state)), unit, 
+                              time, df, coef_nobc, fmla[[1]])
+  # 3. Cross-over with overlap in time dimension
+  coef_overlap <- crossover(unit, time, df, coef_nobc, fmla[[1]], q = frac)
+  
+  # Sum of policy coefficients (uncorrected and corrected)
+  peff <- c(sum(coef_nobc[p]), sum(coef_cbc[p]), 
+            sum(coef_acbc[p]), sum(coef_overlap[p]))
+  
+  # Weighted sum of behavioral coefficients (uncorrected and corrected)
+  if (!is.null(bvars)) {
+    # weight is from April 1st to 10th
+    w <- colMeans(subset(df, df$date >= as.Date("2020-04-01") &
+                           df$date <= as.Date("2020-04-10"))[, bvars])
+    beff <- c(sum(coef_nobc[b]*w), sum(coef_cbc[b]*w),
+              sum(coef_acbc[b]*w), sum(coef_overlap[b]*w))
+  } else {
+    # for piy and pib no such metric
+    beff <- NULL
+  }
+  # outputs: noncorrected, corrected, sum of policy and behavioral coefficients
+  return(list(nobc = coef_nobc, cbc = coef_cbc, acbc = coef_acbc, 
+              ovp = coef_overlap, sumpolicy = peff, sumbehavior = beff))
+}
+
+# A function that calls reg_fe for various regression specifications
+# Inputs:
+#  df:        data
+#  yvar:      dependent variables
+#  pols:      policy variables
+#  bvars:     behavior variables
+#  infovars:  information variables
+#  tvars:     exclusion restriction variable from SIR 
+#  ivlist:    for felm, just specify "0"
+#  L:         time lag, 14 for case growth, 21 for death growth
+#  frac:      see reg_fe
+#  num_split: see reg_fe
+#  fixed:     two way fixed effect
+# Outputs:
+#  list of pib, pbiy and piy regressions 
+mainregressions_fe <- function(df, yvar, pols, bvars, infovars, 
+                               tvars, ivlist = "0", L = 14, frac = 0.6,
+                               num_split = 5, fixed) {
+  # This is considering both pols and interacted of pmask with months
+  # plist <- list(pols, c("pmask.april","pmask.may", pols[-1]))
+  # for pols only
+  plist <- list(pols)
+  
+  ijs <- expand.grid(1:length(plist), 1:length(infovars))
+  
+  # The function loops over plist, infovars to run different specifications
+  pbiy <- apply(ijs, 1, function(ij) {
+    reg_fe(df, yvar, plist[[ij[1]]], bvars, 
+           c(sprintf("lag(%s, %d)", infovars[[ij[2]]], L), tvars), 
+           ivlist, l = L, frac, num_split, fixedeffect = fixed)
+  })
+  
+  piy <- apply(ijs, 1, function(ij) {
+    reg_fe(df, yvar, plist[[ij[1]]], NULL, 
+           c(sprintf("lag(%s, %d)", infovars[[ij[2]]], L), tvars), 
+           ivlist, l = L, frac, num_split, fixedeffect = fixed)
+  })
+  
+  # for pib, note the four behavioral variables each can be a 
+  # dependent variable, so loop over bvars, plist and infovars
+  ijs <- expand.grid(1:length(bvars), 1:length(plist))
+  pib <- list()
+  if (!is.null(infovars)) {
+    infonum <- length(infovars) 
+  } else {
+    infonum <- 1
+  }
+  for (k in 1:infonum) {
+    pib[[k]] <- apply(ijs, 1, function(ij) {
+      reg_fe(df, bvars[ij[1]], plist[[ij[2]]], NULL,
+             c(infovars[[k]]), ivlist, l = 0, frac, num_split, 
+             fixedeffect = fixed)
+    })
+  }
+  # return output as three lists
+  return(list(pib = pib, pbiy = pbiy, piy = piy))
+}
+
 
 ############ Bootstrap Data Functions
 # Produce data for nonparametric panel bootstrap
