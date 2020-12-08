@@ -1,4 +1,4 @@
-# 10/7/2020 Shuowen Chen
+# 12/7/2020 Shuowen Chen
 # This script implements calibrated exercise on LFP
 
 ### set working directory
@@ -331,6 +331,8 @@ data_calireshuffle <- function(data, mle) {
   D <- matrix(data_s$id, ncol = 1)
   td <- kronecker(tapply(lfp_s, D, sum),  matrix(1, T0, 1)) 
   insample <- ((td > 0) & (td < T0))
+  # sort the data by id
+  data_s <- data_s[order(data_s$id), ]
   data_s <- data_s[insample, ]
   return(data_s)
 }
