@@ -129,6 +129,37 @@ data_calireshuffle <- function(data, mle) {
   return(data_b)
 }
 
+dgp <- function(data) {
+  y <- matrix(0, nrow = T + 4, ncol = N)
+  # set the initial 4 obs for each unit as the original data
+  for (t in 1:4) y[t, ] <- data[(t + c(0:(N - 1))*(T + 4)), 6]
+  index <- matrix(index, nrow = T, ncol = N)
+  # use estimated coefficient to construct data
+  for (t in 5:(T + 4)) {
+    y[t, ] <- index[t - 4, ] + coefs0["l1lgdp"]*y[t - 1, ] + 
+      coefs0["l2lgdp"]*y[t - 2, ] + coefs0["l3lgdp"]*y[t - 3, ] + 
+      coefs0["l4lgdp"]*y[t - 4, ] + rnorm(N, mean = 0, sd = sigma)
+  }
+  y <- matrix(y, ncol = 1)
+  data_b <- data.frame(id = kronecker(sample(N), rep(1, T + 4)), 
+                       year = kronecker(rep(1, N), c(1:(T + 4))), lgdp = y, 
+                       dem = data[, "dem"])
+  data_b <- pdata.frame(data_b, index = c("id", "year"))
+  data_b$l1lgdp <- lag(data_b$lgdp, 1)
+  data_b$l2lgdp <- lag(data_b$lgdp, 2) 
+  data_b$l3lgdp <- lag(data_b$lgdp, 3) 
+  data_b$l4lgdp <- lag(data_b$lgdp, 4)
+  return(data_b)
+}
+
+### testing code
+fake_d <- dgp(data)
+form_ab <- lgdp ~ dem + lag(lgdp, 1:4) | lag(lgdp, 2:99) + lag(dem, 1:99)
+# Arellano-Bond (pgmm in plm package)
+ab_fit <- pgmm(form_ab, fake_d, model = "twosteps", effect = "twoways")
+### testing ends
+
+
 ##########
 time_cal <- 500 # number of simulations
 core <- 28

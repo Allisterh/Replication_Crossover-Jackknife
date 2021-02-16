@@ -1,4 +1,4 @@
-# 2/8/2021 Shuowen Chen
+# 1/31/2021 Shuowen Chen
 # This script conducts calibrated exercise using Covid data
 
 library(lfe)
@@ -11,7 +11,7 @@ library(plm)
 # load functions for regression, bias correction and bootstrap
 #source('auxiliaryfunctions.R')
 # load data (sdf)
-#load("covidsince0307.RData")
+load("covidsince0307.RData")
 
 # add weight to sdf (for panel weighted bootstrap)
 sdf$sweight <- 1
@@ -19,15 +19,13 @@ sdf$sweight <- 1
 sdf$week <- as.factor(strftime(sdf$date, format = "%V"))
 N <- 51 # number of states
 dates <- 89 # number of dates
-sdf$avgbusiness <- apply(sdf[,c("pmovie", "prestaurant", "pnonessential")], 1, mean)
 
 #### 1. Define LHS and RHS variables
 # dependent variable for pbiy and piy
 yvar <- "dlogdc" # cases growth
 yvar2 <- "dlogdd" # deaths growth
 # policy variables
-#pols <- c("pmaskbus", "pk12", "pshelter", "pmovie", "prestaurant", "pnonessential") 
-pols <- c("pmaskbus", "pk12", "pshelter", "avgbusiness") 
+pols <- c("pmaskbus", "pk12", "pshelter", "pmovie", "prestaurant", "pnonessential") 
 # behavioral variables
 bvars <- c("workplaces", "retail", "grocery", "transit") 
 # confounder from the SIR
@@ -102,35 +100,12 @@ res_fm <- as.formula(paste("res", "~", rhs, "-1", sep = " "))
 fit_res <- lm(res_fm, res_panel, x = TRUE)
 arcoef <- coef(fit_res) # ar coefficients
 sigma_ar <- sqrt(sum(fit_res$residuals^2)/fit_res$df.residual) 
-sigma_ar2 <- sqrt(sum(d_fit$residuals^2)/d_fit$df.residual)   
+
 # compute the part that is unchanged in the DGP construction
 d_fitted_value <- d_fit$fitted.values
 # Note: the timing of unchanged is from t = 1 till dates-21 for each i
-#unchanged <- d_fitted_value - d_fit$x[, 8:9] %*% coef0[7:8]
-unchanged <- d_fitted_value - d_fit$x[, 6:7] %*% tail(coef0, 2)
+unchanged <- d_fitted_value - d_fit$x[, 8:9] %*% coef0[7:8]
 unchanged <- matrix(unchanged, nrow = dates - 21, byrow = FALSE) # each column correpsonds to a state
-
-
-hybrid_mbcovp <- function(s, n, unit, time, dat, uc, fm, q) {
-  across <- 0 * uc
-  t_cutoff <- c(floor(quantile(time, q)), 
-                ceiling(quantile(time, 1 - q)))
-  for (k in 1:s) {
-    sample1 <- sample(n, ceiling(n/2), replace = FALSE)
-    subsample1 <- (unit %in% sample1 & time <= t_cutoff[1]) | 
-      (!(unit %in% sample1) & time >= t_cutoff[2])
-    subsample2 <- (unit %in% sample1 & time >= t_cutoff[2]) | 
-      (!(unit %in% sample1) & time <= t_cutoff[1])
-    cross1 <- felm(fm, data = dat[subsample1, ], 
-                   weights = dat[subsample1, ]$sweight)
-    cross2 <- felm(fm, data = dat[subsample2, ],
-                   weights = dat[subsample2, ]$sweight)
-    across <- across + ((coef(cross1)[regressors] + coef(cross2)[regressors])/2)/s
-  }
-  # average cross over corrected
-  acbc <- uc/(1 - q) - across*q/(1 - q)
-  return(acbc)
-}
 
 #### 3. DGP Construction for each simulation
 dgp_d <- function(data, mle) {
@@ -147,11 +122,11 @@ dgp_d <- function(data, mle) {
   # synthetic dependent variable (dlogdd)
   y_sim <- matrix(0, nrow = dates, ncol = N) # placeholder
   y_sim[1:21, ] <- matrix(data[, "dlogdd"], nrow = dates, byrow = FALSE)[1:21, ] # initial obs
-  u_iid <- matrix(rnorm(N*dates, 0, sigma_ar2), nrow = dates, ncol = N)
+  u_iid <- matrix(rnorm(N*dates, 0, 1), nrow = dates, ncol = N)
   
   # Both logdd and dlogdd will be updated in the for loop
   for (t in 22:dates) {
-    y_sim[t, ] <- unchanged[t - 21, ] + coef0["dlogdd21"]*y_sim[t - 21, ] + coef0["logdd21"]*logdd_sim[t - 21, ] + u_iid[t, ]
+    y_sim[t, ] <- unchanged[t - 21, ] + coef0[7]*y_sim[t - 21, ] + coef0[8]*logdd_sim[t - 21, ] + res_sim[t, ]
     # update logdd_sim
     logdd_sim[t, ] <- y_sim[t, ] + logdd_sim[t - 7, ]
   }
@@ -172,30 +147,26 @@ estimator <- function(data, fm) {
   lagterms <- sapply(c(pols, infovarsd[[1]]), function(x) out <- lag(data[, x], 21))
   colnames(lagterms) <- regressors
   dat_s <- cbind(data, lagterms)
-  environment(fm) <- environment()
+  environment(fm) <- environment() # so that weighted lm works
   d_fit_synthetic <- lm(fm, data = dat_s, weights = dat_s$sweight)
   
   # uncorrected
   coef_fe <- coef(d_fit_synthetic)[regressors]
   
   # crossover jackknife
-  q <- 0.5
-  # unit <- as.double(dat_s$state)
-  # time <- as.double(dat_s$week)
-  #  t_cutoff <- c(floor(quantile(time, q)), ceiling(quantile(time, 1 - q)))
-  #  subsample1 <- (unit <= median(unit) & time <= t_cutoff[1]) | (unit >= median(unit) & time >= t_cutoff[2])
-  #  subsample2 <- (unit <= median(unit) & time >= t_cutoff[2]) | (unit >= median(unit) & time <= t_cutoff[1])
-  #  cross1 <- lm(fm, data = dat_s[subsample1, ], weights = dat_s[subsample1, ]$sweight)
-  #  cross2 <- lm(fm, data = dat_s[subsample2, ], weights = dat_s[subsample2, ]$sweight)
-  # # 
-  #  cbc2 <- coef_fe/(1 - q) - 0.5*(coef(cross1)[regressors] + coef(cross2)[regressors])*q/(1 - q)
+  q <- 0.6
+  unit <- as.double(dat_s$state)
+  time <- as.double(dat_s$week)
+  t_cutoff <- c(floor(quantile(time, q)), ceiling(quantile(time, 1 - q)))
+  subsample1 <- (unit <= median(unit) & time <= t_cutoff[1]) | (unit >= median(unit) & time >= t_cutoff[2])
+  subsample2 <- (unit <= median(unit) & time >= t_cutoff[2]) | (unit >= median(unit) & time <= t_cutoff[1])
+  cross1 <- lm(fm, data = dat_s[subsample1, ], weights = dat_s[subsample1, ]$sweight)
+  cross2 <- lm(fm, data = dat_s[subsample2, ], weights = dat_s[subsample2, ]$sweight)
   
-  cbc <- hybrid_mbcovp(10, 4539, unit, time, dat_s, coef_fe, fm, q)
+  cbc <- coef_fe/(1 - q) - 0.5*(coef(cross1)[regressors] + coef(cross2)[regressors])*q/(1 - q)
   # return results
   return(c(coef_fe, cbc))
 }
-
-
 
 # function for bootstrap se
 data_wb <- function(data, mle) {
@@ -221,9 +192,10 @@ bse <- function(data, fm, ncores, btimes, bseed) {
   # the new seed
   set.seed(bseed, kind = "L'Ecuyer-CMRG")
   result <- boot(data = data, statistic = estimator, sim = "parametric", 
-                 ran.gen = data_wb, mle = 0, fm = fm, parallel = "multicore", 
-                 ncpus = ncores, R = btimes)
-  result <- structure(vapply(result$t, as.double, numeric(1)), dim = dim(result$t))
+                 ran.gen = data_wb, mle = 0, fm = fm, 
+                 parallel = "multicore", ncpus = ncores, R = btimes)
+  result <- structure(vapply(result$t, as.double, numeric(1)), 
+                      dim = dim(result$t))
   se <- apply(result, 2, function(x) {
     return((quantile(x, .75, na.rm = TRUE) - 
               quantile(x, .25, na.rm = TRUE))/(qnorm(.75) - qnorm(.25)))
@@ -238,64 +210,15 @@ bootstat <- function(data, formula, ncores, btimes, bseed){
   return(c(bestimate, se))
 }
 
-
-time_cal <- 50 # number of simulations
-core <- 1
+time_cal <- 500 # number of simulations
+core <- 28
 seed_bse <- 13 # seed for bootstrap standard error estimation
 set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
-#parallel::mc.reset.stream()
+parallel::mc.reset.stream()
 bd <- boot(data = df, statistic = bootstat, sim = "parametric", mle = 0, 
-           formula = formula_piy, ncores = core, btimes = 5, bseed = seed_bse,
+           formula = formula_piy, ncores = core, btimes = 200, bseed = seed_bse,
            ran.gen = dgp_d, R = time_cal, ncpus = core)
 
-est_fe <- bd$t[, 1:6]
-est_cbc <- bd$t[, 7:12]
-bse_fe <- bd$t[, 13:18]
-bse_cbc <- bd$t[, 19:24]
 
-table_simulation <- function(est, bse, est0) {
-  tab <- matrix(0, nrow = 5, ncol = length(est0))
-  rownames(tab) <- c('Bias', 'Std Dev', 'RMSE', 'p.95 BSE Coverage', 'BSE/SD')
-  colnames(tab) <- names(est0)
-  tab[1, ] <- 100*(apply(est, 2, mean)/est0 - 1)
-  tab[2, ] <- 100*(apply(t(est)/est0, 1, sd))
-  tab[3, ] <- 100*sqrt((apply((t(est)/est0 - 1)^2, 1, mean)))
-  tab[4, ] <- apply((est + qnorm(.05/2)*bse <= est0) &
-                      (est + qnorm(1 - .05/2)*bse >= est0), 2, mean)
-  tab[5, ] <- apply(bse, 2, mean)/apply(est, 2, sd)
-  return(tab)
-}
-
-fe <- table_simulation(est_fe, bse_fe, coef0)
-cbc <- table_simulation(est_cbc, bse_cbc, coef0)
-
-# dat_s <- dgp_d(df, 0)
-# # create lagged data
-# lagterm_s <- sapply(c(pols, infovarsd[[1]]), function(x) out <- lag(dat_s[, x], 21))
-# colnames(lagterm_s) <- regressors
-# dat_s <- cbind(dat_s, lagterm_s)
-# 
-# d_fit_synthetic <- lm(formula_piy, data = dat_s, weights = dat_s$sweight)
-# 
-# # uncorrected
-# coef_fe <- coef(d_fit_synthetic)[regressors]
-# 
-# # crossover jackknife
-#  q <- 0.5
-#  unit <- as.double(df$state)
-#  time <- as.double(df$week)
-#  t_cutoff <- c(floor(quantile(time, q)), ceiling(quantile(time, 1 - q)))
-#  subsample1 <- (unit <= median(unit) & time <= t_cutoff[1]) | (unit >= median(unit) & time >= t_cutoff[2])
-#  subsample2 <- (unit <= median(unit) & time >= t_cutoff[2]) | (unit >= median(unit) & time <= t_cutoff[1])
-#  cross1 <- lm(formula_piy, data = df[subsample1, ], weights = df[subsample1, ]$sweight)
-#  cross2 <- lm(formula_piy, data = df[subsample2, ], weights = df[subsample2, ]$sweight)
-# 
-# cbc <- coef_fe/(1 - q) - 0.5*(coef(cross1)[regressors] + coef(cross2)[regressors])*q/(1 - q)
-cbc <- hybrid_mbcovp(5, 4539, unit, time, dat_s, coef_fe, formula_piy, q)
-# return results
-
-
-
-
-#rbind(coef0, coef_fe, cbc)
+save.image(file = "piy.RData")
 

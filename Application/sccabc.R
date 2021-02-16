@@ -13,7 +13,7 @@ sdf$grouppol <- (sdf$pshelter + sdf$pmovie + sdf$prestaurant)/3
 sdf$grouppol2 <- (sdf$pshelter + sdf$pmovie + sdf$prestaurant + sdf$pnonessential)/4
 
 createfmla_fe <- function(yvar, xvars, iv = "0", cluster = "state",
-                          fe = c("state + month", "state*month")) {
+                          fe = c("state + week", "state*week")) {
   fe <- match.arg(fe)
   rhs <- paste(xvars, collapse = " + ")
   rhs_felm <- paste(rhs," | ", fe, " | ", iv, " | ", 
@@ -54,6 +54,43 @@ data_wb <- function(data, mle) {
   # Add to the data and treat it as sampling weight
   data$sweight <- weight
   return(data)
+}
+
+reg2 <- function(df, # data
+                yvar, # dependent variable (1 of 4 bevahiors if pib)
+                pols, # policies
+                bvars, # behavior (NULL if not behavior)
+                infovars,
+                x, # controls 
+                iv, # iv for felm, if not needed just input "0" 
+                l = 14,
+                fixedeffect) {
+  if (l == 0) {
+    # This is for pib
+    p <- pols
+    b <- bvars
+  } else {
+    # This is for pbiy and piy
+    p <- sprintf("lag(%s, %d)", pols, l)
+    b <- sprintf("lag(%s, %d)", bvars, l)
+    info <- sprintf("lag(%s, %d)", infovars, l)
+    # this is for lm command because it cannot run if data 
+    # columns are not actually created
+    lagterm <- sapply(c(pols, bvars, infovars), 
+                      function(x) out <- lag(df[, x], l))
+    colnames(lagterm) <- c(p, b, info)
+    df <- cbind(df, lagterm)
+  }
+  # create regression formula
+  xvars <- c(p, b, info)
+  fmla <- createfmla_fe(yvar, xvars, fe = fixedeffect, iv = iv)
+  environment(fmla[[2]]) <- environment()
+  # Uncorrected Estimator
+  whole <- felm(fmla[[1]], data = df, weights = df$sweight)  
+  coef_nobc <- coef(whole)
+  whole_lm <- lm(fmla[[2]], data = df, x = TRUE, weights = df$sweight,
+                 na.action = na.omit)
+  return(whole_lm)
 }
 
 reg <- function(df, # data

@@ -6,7 +6,7 @@ filepath <- "/Users/shuowenchen/desktop/Research/Panel-Cross-over-jackknife/Cros
 setwd(filepath)
 
 library(foreign)
-#library(xtable)
+library(xtable)
 library(alpaca)
 library(boot)
 

@@ -1,6 +1,6 @@
-# 12/23/2020 Shuowen Chen
-# This script stores some auxiliary functions for the crossover 
-# jackknife bias correction project
+# 1/5/2021 Shuowen Chen
+# This script stores auxiliary functions for the Covid application for the
+# crossover jackknife project
 
 ###### Create regression formula 
 # Inputs:
@@ -10,16 +10,15 @@
 #          (b) For pib, regressors are policy and information, dependent variable
 #              is 1 of the 4 behavior variables
 #          (c) For piy, regressors are policy and information variables
-# iv:      This is to accommodate the syntax of felm. "0" means no iv. 
 # cluster: cluster at state level (treatment). 
 # Outputs:
 # fm1:     formula for felm 
 # fm2:     formula for lm (for analytical bias correction) 
-createfmla_fe <- function(yvar, xvars, iv = "0", cluster = "state",
+createfmla_fe <- function(yvar, xvars, cluster = "state",
                           fe = c("state + month", "state + week")) {
   fe <- match.arg(fe)
   rhs <- paste(xvars, collapse = " + ")
-  rhs_felm <- paste(rhs," | ", fe, " | ", iv, " | ", paste(cluster, collapse = " + ")) 
+  rhs_felm <- paste(rhs," | ", fe, " | ", "0", " | ", paste(cluster, collapse = " + ")) 
   rhs_lm <- paste(rhs, "+", fe, collapse = " ")
   # formula for felm
   fm1 <- as.formula(paste(yvar, "~", rhs_felm, sep = " "))
@@ -244,9 +243,9 @@ reg_fe <- function(df, yvar, pols, bvars, x, l = 14, frac, num_split,
   }
   # create regression formula
   xvars <- c(p, b, x)
-  fmla <- createfmla_fe(yvar, xvars, fe = fixedeffect, iv = "0")
+  fmla <- createfmla_fe(yvar, xvars, fe = fixedeffect)
   # Uncorrected Estimator
-  whole <- felm(fmla[[1]], data = df, weights = df$sweight)  
+  whole <- felm(fmla[[1]], data = df, weights = df$sweight, keepX = TRUE)  
   coef_nobc <- coef(whole)
   if (purpose == "cali") {
     peff <- sum(coef_nobc[p])
@@ -260,7 +259,9 @@ reg_fe <- function(df, yvar, pols, bvars, x, l = 14, frac, num_split,
       # for piy and pib no such metric
       beff <- NULL
     }
-    return(list(nobc = coef_nobc, sumpolicy = peff, sumbehavior = beff))
+    # save the fit to obtain residuals
+    return(list(fit = whole, nobc = coef_nobc, sumpolicy = peff, 
+                sumbehavior = beff))
   } else {
     # Various Bias Correction Estimators
     unit <- as.double(df$state)
@@ -268,8 +269,8 @@ reg_fe <- function(df, yvar, pols, bvars, x, l = 14, frac, num_split,
     # 1. Crossover Jackknife without overlap
     coef_cbc <- crossover(unit, time, df, coef_nobc, fmla[[1]], q = 0.5)
     # 2. Multiple split bias correction
-    coef_acbc <- multiple_split(s = num_split, length(levels(df$state)), unit, 
-                                time, df, coef_nobc, fmla[[1]])
+    coef_acbc <- multiple_split(s = num_split, length(levels(df$state)), 
+                                unit, time, df, coef_nobc, fmla[[1]])
     # 3. Cross-over with overlap in time dimension
     coef_overlap <- crossover(unit, time, df, coef_nobc, fmla[[1]], q = frac)
     
@@ -320,8 +321,10 @@ mainregressions <- function(df, yvar, pols, bvars, infovars, tvars,
   # plist <- list(pols, c("pmask.april","pmask.may", pols[-1]))
   # for pols only
   plist <- list(pols)
-  
+  # deal with only one info structure
+  if (!is.list(infovars)) infovars <- list(infovars)
   # The function loops over plist, infovars to run different specifications
+  
   ijs <- expand.grid(1:length(plist), 1:length(infovars))
   if (spec == "pbiy") {
     result <- apply(ijs, 1, function(ij) {
@@ -355,6 +358,7 @@ mainregressions <- function(df, yvar, pols, bvars, infovars, tvars,
   # return output 
   return(result)
 }
+
 
 ############ Bootstrap Data Functions
 # Produce data for nonparametric panel bootstrap
