@@ -407,3 +407,7 @@ age_co <- table_simulation(est_age, bse_age, est_ase[, 6],
 age2_co <- table_simulation(est_age2, bse_age2, est_ase[, 7], 
                             betahatfete[7], app = "lfp")
 
+
+
+
+

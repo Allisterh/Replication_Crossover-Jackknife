@@ -1,4 +1,4 @@
-# 11/4/2020 Shuowen Chen
+# 2/14/2021 Shuowen Chen
 # A script to implement Arellano-Bond for calibrated democracy simulation
 library(foreign)
 library(plm)
@@ -6,7 +6,7 @@ library(sandwich)
 library(boot)
 
 
-# Generate bootstrap data for standard errors 
+# Nonparametric bootstrap
 data.rg <- function(data, mle) {
   N <- length(unique(data$id))
   T <- length(unique(data$year))
@@ -17,6 +17,20 @@ data.rg <- function(data, mle) {
   data_b <- data.frame(data_b)
   data_b <- pdata.frame(data_b, index = c("id", "year"))
   return(data_b)
+}
+
+# Panel weighted bootstrap
+data_wb <- function(data, mle) {
+  # number of states
+  n <- length(unique(data$id))
+  t <- length(unique(data$year))
+  # Exponential weights
+  multipliers <- rexp(n)
+  # For each state, weight is the same for all dates
+  weights <- rep(multipliers/sum(multipliers), each = t)
+  # Add to the data and treat it as sampling weight
+  data$weights <- weights
+  return(data)
 }
 
 # Estimators to be computed in each calibration and bootstrap estimation
@@ -35,9 +49,8 @@ estimator2 <- function(data, form) {
   cse_lr_ab <- sqrt(t(jac_lr) %*% HCV_coefs[1:5, 1:5] %*% jac_lr)
   
   return(c(coefs_ab[1:5], cse_ab[1:5], lr_ab, cse_lr_ab))
+  
 }
-
-
 
 # A function that calls computes bootstrap standard errors within in simulation
 bse <- function(data, fm, ncores, btimes, bseed) {
@@ -61,10 +74,37 @@ bse <- function(data, fm, ncores, btimes, bseed) {
   return(se)
 }
 
+bsew <- function(data, fm, ncores, btimes, bseed) {
+  # store seeds set in the global environment
+  old <- .Random.seed
+  # upon exiting the function environment, 
+  # restore to the original seed
+  on.exit({.Random.seed <<- old})
+  # within this function environment, set
+  # the new seed
+  set.seed(bseed, kind = "L'Ecuyer-CMRG")
+  result <- boot(data = data, statistic = estimator2, sim = "parametric", 
+                 ran.gen = data_wb, mle = 0, form = fm, 
+                 parallel = "multicore", ncpus = ncores, R = btimes)
+  result <- structure(vapply(result$t, as.double, numeric(1)), 
+                      dim = dim(result$t))
+  se <- apply(result, 2, function(x) {
+    return((quantile(x, .75, na.rm = TRUE) - 
+              quantile(x, .25, na.rm = TRUE))/(qnorm(.75) - qnorm(.25)))
+  })
+  return(se)
+}
+
 # statistics to be computed in each bootstrap draw 
 bootstat <- function(data, formula, ncores, btimes, bseed){
   bestimate <- estimator2(data, formula)
   se <- bse(data, formula, ncores, btimes, bseed)
+  return(c(bestimate, se))
+}
+
+bootstatw <- function(data, formula, ncores, btimes, bseed){
+  bestimate <- estimator2(data, formula)
+  se <- bsew(data, formula, ncores, btimes, bseed)
   return(c(bestimate, se))
 }
 
@@ -93,43 +133,8 @@ N <- length(levels(data$id))
 
 # Generate simulated data
 
-data_calireshuffle <- function(data, mle) {
-  y  <- matrix(0, nrow = T, ncol = N)
-  l1y  <- matrix(0, nrow = T, ncol = N)
-  l2y  <- matrix(0, nrow = T, ncol = N)
-  l3y  <- matrix(0, nrow = T, ncol = N)
-  l4y  <- matrix(0, nrow = T, ncol = N)
-  # set the initial observations in lags to the observed values in the dataset
-  for (t in 1:4) l4y[t, ] <- data[(t + c(0:(N - 1))*(T + 4)), 6]
-  l3y[1:3, ] <- l4y[2:4, ]
-  l2y[1:2, ] <- l3y[2:3, ]
-  l1y[1, ] <- l2y[2, ]
-  y[1, ] <- index[1 + c(0:(N - 1))*T] + coefs0["l1lgdp"]*l1y[1, ] + 
-    coefs0["l2lgdp"]*l2y[1, ] + coefs0["l3lgdp"]*l3y[1, ] + 
-    coefs0["l4lgdp"]*l4y[1, ] + rnorm(N, mean = 0, sd = sigma)
-  for (t in 2:T) {
-    l4y[t, ] <- l3y[t - 1, ]
-    l3y[t, ] <- l2y[t - 1, ]
-    l2y[t, ] <- l1y[t - 1, ]
-    l1y[t, ] <- y[t - 1, ]
-    y[t, ] <- index[t + c(0:(N - 1))*T] + coefs0["l1lgdp"]*l1y[t, ] + 
-      coefs0["l2lgdp"]*l2y[t, ] + coefs0["l3lgdp"]*l3y[t, ] + 
-      coefs0["l4lgdp"]*l4y[t, ] + rnorm(N, mean = 0, sd = sigma)
-  }
-  ys <- matrix(y, ncol = 1)
-  l1ys <- matrix(l1y, ncol = 1)
-  l2ys <- matrix(l2y, ncol = 1)
-  l3ys <- matrix(l3y, ncol = 1)
-  l4ys <- matrix(l4y, ncol = 1)
-  data_b <- data.frame(id = kronecker(sample(N), rep(1, T)), 
-                       year = kronecker(rep(1, N), c(1:T)), lgdp = ys, 
-                       l1lgdp = l1ys, l2lgdp = l2ys, l3lgdp = l3ys, 
-                       l4lgdp = l4ys, dem = fe_fit$x[, "dem"])
-  data_b <- pdata.frame(data_b, index = c("id", "year"))
-  return(data_b)
-}
 
-dgp <- function(data) {
+dgp <- function(data, mle) {
   y <- matrix(0, nrow = T + 4, ncol = N)
   # set the initial 4 obs for each unit as the original data
   for (t in 1:4) y[t, ] <- data[(t + c(0:(N - 1))*(T + 4)), 6]
@@ -152,13 +157,6 @@ dgp <- function(data) {
   return(data_b)
 }
 
-### testing code
-fake_d <- dgp(data)
-form_ab <- lgdp ~ dem + lag(lgdp, 1:4) | lag(lgdp, 2:99) + lag(dem, 1:99)
-# Arellano-Bond (pgmm in plm package)
-ab_fit <- pgmm(form_ab, fake_d, model = "twosteps", effect = "twoways")
-### testing ends
-
 
 ##########
 time_cal <- 500 # number of simulations
@@ -168,7 +166,13 @@ set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
 parallel::mc.reset.stream()
 bd <- boot(data = data, statistic = bootstat, sim = "parametric", mle = 0, 
            formula = form, ncores = core, btimes = 200, bseed = seed_bse,
-           ran.gen = data_calireshuffle, R = time_cal, ncpus = core)
+           ran.gen = dgp, R = time_cal, ncpus = core)
+
+#set.seed(88, kind = "L'Ecuyer-CMRG") # seed for calibration
+#parallel::mc.reset.stream()
+#bdw <- boot(data = data, statistic = bootstatw, sim = "parametric", mle = 0, 
+#           formula = form, ncores = core, btimes = 200, bseed = seed_bse,
+#           ran.gen = dgp, R = time_cal, ncpus = core)
 
 est_dem <- bd$t[,1]
 est_l1lgdp <- bd$t[,2]
@@ -185,6 +189,22 @@ bse_l2lgdp <- bd$t[,15]
 bse_l3lgdp <- bd$t[,16]
 bse_l4lgdp <- bd$t[,17]
 bse_lr <- bd$t[,23]
+
+est_demw <- bdw$t[,1]
+est_l1lgdpw <- bdw$t[,2]
+est_l2lgdpw <- bdw$t[,3]
+est_l3lgdpw <- bdw$t[,4]
+est_l4lgdpw <- bdw$t[,5]
+est_lrw <- bdw$t[,11]
+est_csew <- bdw$t[,6:10]
+est_cse_lrw <- bdw$t[,12]
+
+bse_demw <- bdw$t[,13]
+bse_l1lgdpw <- bdw$t[,14]
+bse_l2lgdpw <- bdw$t[,15]
+bse_l3lgdpw <- bdw$t[,16]
+bse_l4lgdpw <- bdw$t[,17]
+bse_lrw <- bdw$t[,23]
 
 table_simulation <- function(est, bse, ase, est0, 
                              app = c("dem", "lfp")) {
@@ -214,6 +234,11 @@ l3lgdp_co <- table_simulation(est_l3lgdp, bse_l3lgdp, est_cse[, 4], coefs0[5])
 l4lgdp_co <- table_simulation(est_l4lgdp, bse_l4lgdp, est_cse[, 5], coefs0[6])
 lr_co <- table_simulation(est_lr, bse_lr, est_cse_lr, lr0)
 
-
+dem_cow <- table_simulation(est_demw, bse_demw, est_cse[, 1], coefs0[2])
+l1lgdp_cow <- table_simulation(est_l1lgdpw, bse_l1lgdpw, est_cse[, 2], coefs0[3])
+l2lgdp_cow <- table_simulation(est_l2lgdpw, bse_l2lgdpw, est_cse[, 3], coefs0[4])
+l3lgdp_cow <- table_simulation(est_l3lgdpw, bse_l3lgdpw, est_cse[, 4], coefs0[5])
+l4lgdp_cow <- table_simulation(est_l4lgdpw, bse_l4lgdpw, est_cse[, 5], coefs0[6])
+lr_cow <- table_simulation(est_lrw, bse_lrw, est_cse_lr, lr0)
 ######## Save the workspace
 save.image(file = "democracyab.RData")
